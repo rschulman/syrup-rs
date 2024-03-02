@@ -1,4 +1,4 @@
-use preserves::value::{IOValue, Map, NestedValue, Value};
+use preserves::value::{IOValue, Map, NestedValue, Set, Value};
 use winnow::ascii::digit1;
 use winnow::combinator::{alt, dispatch, empty, fail, repeat_till};
 use winnow::prelude::*;
@@ -13,7 +13,7 @@ pub fn from_str(input: &mut &str) -> PResult<IOValue> {
 
 fn any_syrup(input: &mut &str) -> PResult<IOValue> {
     alt((
-        boolean, integer, bytestring, string, symbol, dictionary, //list, record, set,
+        boolean, integer, bytestring, string, symbol, dictionary, list, record, set,
     ))
     .parse_next(input)
 }
@@ -56,6 +56,28 @@ fn dictionary(input: &mut &str) -> PResult<IOValue> {
         ("{", repeat_till(0.., (any_syrup, any_syrup), "}")).parse_next(input)?;
     let map_holder: Map<IOValue, IOValue> = Map::from_iter(inner);
     Ok(IOValue::new(map_holder))
+}
+
+fn list(input: &mut &str) -> PResult<IOValue> {
+    let (_, (inner, _)): (_, (Vec<IOValue>, _)) =
+    ("[", repeat_till(0.., any_syrup, "]")).parse_next(input)?;
+    Ok(IOValue::new(inner))
+}
+
+fn record(input: &mut &str) -> PResult<IOValue> {
+    let (_, (label, (inner, _))): (_, (IOValue, (Vec<IOValue>, _))) =
+    ("<", (any_syrup, repeat_till(0.., any_syrup, ">"))).parse_next(input)?;
+
+    let mut record = preserves::value::Value::record(label, inner.len() - 1);
+
+    record.fields_vec_mut().extend_from_slice(&inner);
+    Ok(record.finish().wrap())
+}
+
+fn set(input: &mut &str) -> PResult<IOValue> {
+    let (_, (inner, _)): (_, (Set<IOValue>, _)) =
+    ("#", repeat_till(0.., any_syrup, "$")).parse_next(input)?;
+    Ok(IOValue::new(inner))
 }
 
 #[cfg(test)]
@@ -176,6 +198,65 @@ mod tests {
                 .value_owned()
                 .into_dictionary()
                 .expect("IOValue was not a dictionary")
+        );
+    }
+
+    #[test]
+    fn test_list() {
+        let mut input = "[4\"name3\"bob3\"age12+8\"favorite5\"pizza]";
+        let response = crate::from_str(&mut input).expect("Failed to parse dictionary test");
+        let mut expected = Vec::new();
+        expected.push(IOValue::new("name"));
+        expected.push(IOValue::new("bob"));
+        expected.push(IOValue::new("age"));
+        expected.push(IOValue::new(12));
+        expected.push(IOValue::new("favorite"));
+        expected.push(IOValue::new("pizza"));
+        assert_eq!(
+            expected,
+            response
+                .value_owned()
+                .into_sequence()
+                .expect("IOValue was not a sequence")
+        );
+    }
+
+    #[test]
+    fn test_record() {
+        let mut input = "<4\"recd3\"bob3\"age12+8\"favorite5\"pizza>";
+        let response = crate::from_str(&mut input).expect("Failed to parse dictionary test");
+        let mut expected = preserves::value::Value::record(IOValue::new("recd"), 5);
+        let expected_fields = expected.fields_vec_mut();
+        expected_fields.push(IOValue::new("bob"));
+        expected_fields.push(IOValue::new("age"));
+        expected_fields.push(IOValue::new(12));
+        expected_fields.push(IOValue::new("favorite"));
+        expected_fields.push(IOValue::new("pizza"));
+        assert_eq!(
+            expected,
+            response
+                .value_owned()
+                .into_record()
+                .expect("IOValue was not a record")
+        );
+    }
+    #[test]
+    fn test_set() {
+        let mut input = "#3\"set3\"bob3\"age12+8\"favorite5\"pizza$";
+        let response = crate::from_str(&mut input).expect("Failed to parse dictionary test");
+        let mut expected = preserves::value::Set::new();
+        expected.insert(IOValue::new("set"));
+        expected.insert(IOValue::new("bob"));
+        expected.insert(IOValue::new("age"));
+        expected.insert(IOValue::new(12));
+        expected.insert(IOValue::new("favorite"));
+        expected.insert(IOValue::new("pizza"));
+        assert_eq!(
+            expected,
+            response
+                .value_owned()
+                .into_set()
+                .expect("IOValue was not a set")
         );
     }
 }
